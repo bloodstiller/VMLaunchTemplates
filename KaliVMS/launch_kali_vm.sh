@@ -13,10 +13,9 @@ NEW_QCOW_IMAGE="$NEW_VM_DIR/kali-linux-2024.3.qcow2"
 RAM="8192"
 CORES=6
 SETUP_SCRIPT="$SCRIPT_DIR/kali_setup.sh"
-SSH_KEY_PATH="/home/martin/.ssh/git_ed25519"
-SSH_KEY_DIR="/home/martin/.ssh"
 LOG_FILE="$SCRIPT_DIR/$VM_NAME-log.txt"
 SHARED_FOLDER="$NEW_VM_DIR/shared"
+DROPBOX_FOLDER="/home/martin/Dropbox"
 TEST_MODE=false
 
 # Function for logging
@@ -90,9 +89,10 @@ if $TEST_MODE; then
     log "[TEST]   CPUs: $CORES"
     log "[TEST]   Disk: $NEW_QCOW_IMAGE"
     log "[TEST]   Shared Folder: $SHARED_FOLDER"
+    log "[TEST]   Dropbox Folder: $DROPBOX_FOLDER"
 else
     log "Launching VM with name: $VM_NAME"
-    virt-install \
+    sudo virt-install \
         --name "$VM_NAME" \
         --memory $RAM \
         --vcpus $CORES \
@@ -102,8 +102,7 @@ else
         --network network=default \
         --graphics spice \
         --noautoconsole \
-        --filesystem source="$SHARED_FOLDER",target=host_share,mode=mapped \
-        --filesystem source="$SSH_KEY_DIR",target=host_ssh,mode=squash
+        --filesystem source="$SHARED_FOLDER",target=host_share,mode=mapped
 
     log "VM launched successfully"
 fi
@@ -120,4 +119,6 @@ echo "   sudo mount -t 9p -o trans=virtio host_share /mnt/host_share"
 echo "4. The setup script will be available at /mnt/host_share/kali_setup.sh"
 echo "5. To run the setup script:"
 echo "   sudo /mnt/host_share/kali_setup.sh"
+echo "6. To access your Dropbox folder, use SSHFS or another file sharing method after the VM is running."
+echo "7. Remember to mount the 100GB disk to /mnt/100gb"
 echo "Use virt-manager to connect to the VM."

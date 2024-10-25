@@ -2,32 +2,86 @@
 
 # kali_setup.sh
 
-# Mount the shared folder
-sudo mkdir -p /mnt/host_setup
-sudo mount -t 9p -o trans=virtio host_setup /mnt/host_setup
+# Set up logging
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOG_FILE="$HOME/Desktop/kali_setup_log.txt"
+DRY_RUN=false
 
-# Mount the SSH key directory
-sudo mkdir -p /mnt/host_ssh
-sudo mount -t 9p -o trans=virtio host_ssh /mnt/host_ssh
+# Colors for terminal output
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+NC='\033[0m' # No Color
 
-# Copy the SSH key
-SSH_KEY_NAME=$(basename "$SSH_KEY_PATH")
-mkdir -p ~/.ssh
-cp /mnt/host_ssh/"$SSH_KEY_NAME" ~/.ssh/
-chmod 600 ~/.ssh/"$SSH_KEY_NAME"
+# Function for logging
+log() {
+    local level="$1"
+    local message="$2"
+    local color=""
+    case $level in
+    "INFO") color="$GREEN" ;;
+    "WARN") color="$YELLOW" ;;
+    "ERROR") color="$RED" ;;
+    esac
+    echo -e "${color}[$(date '+%Y-%m-%d %H:%M:%S')] [$level] $message${NC}" | tee -a "$LOG_FILE"
+}
 
-# Add the key to ssh-agent
-eval $(ssh-agent -s)
-ssh-add ~/.ssh/"$SSH_KEY_NAME"
+# Array to store errors
+errors=()
 
-# Unmount the SSH key directory
-sudo umount /mnt/host_ssh
+# Function to execute or simulate command
+execute() {
+    if [ "$DRY_RUN" = true ]; then
+        log "INFO" "[DRY RUN] Would execute: $*"
+    else
+        log "INFO" "Executing: $*"
+        eval "$@"
+        exit_status=$?
+        if [ $exit_status -ne 0 ]; then
+            error_msg="Command failed with exit status $exit_status: $*"
+            log "ERROR" "$error_msg"
+            errors+=("$error_msg")
+        fi
+    fi
+}
+
+# Function to execute or simulate command with automatic yes
+execute_auto_yes() {
+    if [ "$DRY_RUN" = true ]; then
+        log "INFO" "[DRY RUN] Would execute: yes | $*"
+    else
+        log "INFO" "Executing with auto yes: $*"
+        yes | eval "$@"
+        exit_status=$?
+        if [ $exit_status -ne 0 ]; then
+            error_msg="Command failed with exit status $exit_status: yes | $*"
+            log "ERROR" "$error_msg"
+            errors+=("$error_msg")
+        fi
+    fi
+}
+
+# Parse command line arguments
+while [[ "$#" -gt 0 ]]; do
+    case $1 in
+    --dry-run) DRY_RUN=true ;;
+    *)
+        echo "Unknown parameter passed: $1"
+        exit 1
+        ;;
+    esac
+    shift
+done
+
+log "INFO" "Starting Kali setup script"
 
 # Update the system
-sudo apt update
+log "INFO" "=== System Update ==="
+execute sudo apt update
 
 # Install packages
-sudo apt install -y \
+log "INFO" "=== Package Installation ==="
+execute sudo apt install -y \
     docker.io \
     emacs \
     eza \
@@ -36,55 +90,94 @@ sudo apt install -y \
     bat
 
 # Install Starship
-curl -sS https://starship.rs/install.sh | sh
+log "INFO" "=== Installing Starship ==="
+execute_auto_yes curl -sS https://starship.rs/install.sh | sh
 
 # Install oh-my-zsh
-sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
-# make zsh default
-chsh -s $(which zsh)
+log "INFO" "=== Installing oh-my-zsh ==="
+execute_auto_yes sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
 
 # Install zsh plugins
-git clone https://github.com/zsh-users/zsh-syntax-highlighting.git ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-syntax-highlighting
-git clone https://github.com/zsh-users/zsh-autosuggestions ${ZSH_CUSTOM:-~/.oh-my-zsh/custom}/plugins/zsh-autosuggestions
-git clone https://github.com/zdharma-continuum/fast-syntax-highlighting.git ${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins/fast-syntax-highlighting
-git clone --depth 1 -- https://github.com/marlonrichert/zsh-autocomplete.git $ZSH_CUSTOM/plugins/zsh-autocomplete
+log "INFO" "=== Installing zsh plugins ==="
+execute git clone https://github.com/zsh-users/zsh-syntax-highlighting.git ~/.oh-my-zsh/custom/plugins/zsh-syntax-highlighting
+execute git clone https://github.com/zsh-users/zsh-autosuggestions ~/.oh-my-zsh/custom/plugins/zsh-autosuggestions
+execute git clone https://github.com/zdharma-continuum/fast-syntax-highlighting.git ~/.oh-my-zsh/custom/plugins/fast-syntax-highlighting
+execute git clone --depth 1 -- https://github.com/marlonrichert/zsh-autocomplete.git ~/.oh-my-zsh/plugins/zsh-autocomplete
 
 # Install tmuxinator
-gem install tmuxinator
-
-# Install Dropbox
-wget https://www.dropbox.com/download?dl=packages/ubuntu/dropbox_2024.04.17_amd64.deb
-sudo dpkg -i dropbox_2024.04.17_amd64.deb
+log "INFO" "=== Installing tmuxinator ==="
+execute sudo gem install tmuxinator
 
 # Install doom emacs
-git clone --depth 1 https://github.com/doomemacs/doom emacs ~/.emacs.d
-~/.emacs.d/bin/doom install
+log "INFO" "=== Installing Doom Emacs ==="
+execute git clone --depth 1 https://github.com/doomemacs/doomemacs ~/.emacs.d
+execute_auto_yes ~/.emacs.d/bin/doom install
 
 # Clone dotfiles repo
-git clone https://github.com/bloodstiller/kaliconfigs.git ~/.dotfiles
+log "INFO" "=== Cloning dotfiles repository ==="
+execute git clone https://github.com/bloodstiller/kaliconfigs.git ~/.dotfiles
 
-# Symlink dotfiles
-ln -s ~/.dotfiles/Zsh/.zshrc ~/.zshrc
-ln -s ~/.dotfiles/Doom/* ~/.doom.d
-ln -s ~/.dotfiles/Starship/.config/starship.toml ~/.config/starship.toml
-ln -s ~/.dotfiles/Alacritty/.config/alacritty.yml ~/.config/alacritty.yml
-ln -s ~/.dotfiles/tmux/.tmux.conf ~/.tmux.conf
+# Setup dotfiles
+log "INFO" "=== Setting up dotfiles ==="
+execute mkdir -p ~/.doom.d
+execute rm -rf ~/.zshrc ~/.doom.d/* ~/.config/starship.toml ~/.config/alacritty.yml
+execute ln -s ~/.dotfiles/Zsh/.zshrc ~/.zshrc
+execute ln -s ~/.dotfiles/Doom/config.el ~/.doom.d/config.el
+execute ln -s ~/.dotfiles/Doom/init.el ~/.doom.d/init.el
+execute ln -s ~/.dotfiles/Doom/packages.el ~/.doom.d/packages.el
+execute ln -s ~/.dotfiles/Doom/README.org ~/.doom.d/README.org
+execute ln -s ~/.dotfiles/Starship/starship.toml ~/.config/starship.toml
+execute ln -s ~/.dotfiles/Alacritty ~/.config/Alacritty
+execute ln -s ~/.dotfiles/Tmux/.tmux.conf ~/.tmux.conf
 
-sudo systemctl enable docker --now
+# Enable docker
+log "INFO" "=== Enabling Docker ==="
+execute sudo systemctl enable docker --now
 
 # Build doom packages
-~/.emacs.d/bin/doom sync
+log "INFO" "=== Building Doom Emacs packages ==="
+execute ~/.emacs.d/bin/doom sync
 
-# Create mount point for 100gb storage
-sudo mkdir -p /mnt/100gb
+# Setup mount points and directories
+log "INFO" "=== Setting up mount points and directories ==="
+execute sudo mkdir -p /mnt/100gb
+execute mkdir -p ~/Dropbox
+
+# Mount shared folders & drive
+log "INFO" "=== Mounting shared folders and drives ==="
+execute sudo mount -t ext4 UUID=89edac1a-7171-4421-87a6-696050f30325 /mnt/100gb
+
 # Update fstab
-echo "UUID=89edac1a-7171-4421-87a6-696050f30325	/mnt/100gb	ext4	defaults	0	2" | sudo tee -a /etc/fstab
+log "INFO" "=== Updating fstab ==="
+execute echo "host_share /home/kali/host_share 9p trans=virtio,_netdev 0 0" | sudo tee -a /etc/fstab
+execute echo "UUID=89edac1a-7171-4421-87a6-696050f30325	/mnt/100gb	ext4	defaults	0	2" | sudo tee -a /etc/fstab
 
-# Upgrade packages
-sudo apt upgrade -y
+# Install Dropbox
+log "INFO" "=== Installing Dropbox ==="
+execute wget https://www.dropbox.com/download?dl=packages/ubuntu/dropbox_2024.04.17_amd64.deb -O $HOME/Desktop/dropbox_2024.04.17_amd64.deb
+execute sudo dpkg -i $HOME/Desktop/dropbox_2024.04.17_amd64.deb
+execute sudo apt --fix-broken install -y
+
+# Symlink Dropbox and Wordlists
+log "INFO" "=== Setting up Dropbox and Wordlists symlinks ==="
+execute sudo ln -s /mnt/100gb/Dropbox/Dropbox $HOME/Dropbox
+execute sudo ln -s /usr/share/wordlists ~/wordlists
 
 # Clean up
-sudo apt autoremove -y
-sudo apt clean
+log "INFO" "=== Cleaning up ==="
+execute sudo apt autoremove -y
+execute sudo apt clean
 
-echo "Setup complete!"
+log "INFO" "Setup complete!"
+log "INFO" "Finish setup of Dropbox in GUI"
+
+if [ ${#errors[@]} -ne 0 ]; then
+    log "WARN" "The following errors occurred during setup:"
+    for error in "${errors[@]}"; do
+        log "WARN" "  - $error"
+    done
+else
+    log "INFO" "Setup completed successfully with no errors."
+fi
+
+#TODO copy starhip and alacritty config to dotfiles repo
