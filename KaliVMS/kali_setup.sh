@@ -80,9 +80,6 @@ sudo mkdir -p /mnt/100gb
 # Update fstab
 echo "UUID=89edac1a-7171-4421-87a6-696050f30325	/mnt/100gb	ext4	defaults	0	2" | sudo tee -a /etc/fstab
 
-
-
-
 # Upgrade packages
 sudo apt upgrade -y
 

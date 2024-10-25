@@ -1,68 +1,123 @@
 #!/bin/bash
 
+# Get the directory of the script
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+
 # Variables
-VM_NAME="Kali"
-QCOW_IMAGE="/home/martin/Hacking/VMS/VirtManagerMachines/Kali_Base/kali-linux-2023.1-qemu-amd64-clone-1.qcow2"
-STORAGE_IMAGE="/home/martin/Hacking/VMS/VirtManagerMachines/Kali_Base/Kali-Sata-Storage.qcow2"
-RAM="8G"
+TODAY_DATE=$(date +"%Y-%m-%d")
+VM_NAME="Kali-$TODAY_DATE"
+BASE_QCOW_IMAGE="/run/media/martin/2TB/VMS/Templates/KaliVMTemplate/kali-linux-2024.3.qcow2"
+PRODUCTION_DIR="/run/media/martin/2TB/VMS/ProductionMachines"
+NEW_VM_DIR="$PRODUCTION_DIR/$VM_NAME"
+NEW_QCOW_IMAGE="$NEW_VM_DIR/kali-linux-2024.3.qcow2"
+RAM="8192"
 CORES=6
-SETUP_SCRIPT="/path/to/kali_setup.sh"
-SSH_KEY_PATH="/path/to/your/ssh/key"
-SSH_KEY_DIR=$(dirname "$SSH_KEY_PATH")
+SETUP_SCRIPT="$SCRIPT_DIR/kali_setup.sh"
+SSH_KEY_PATH="/home/martin/.ssh/git_ed25519"
+SSH_KEY_DIR="/home/martin/.ssh"
+LOG_FILE="$SCRIPT_DIR/$VM_NAME-log.txt"
+SHARED_FOLDER="$NEW_VM_DIR/shared"
+TEST_MODE=false
 
-# Check if the base image exists
-if [ ! -f "$QCOW_IMAGE" ]; then
-    echo "Error: Base QCOW2 image not found at $QCOW_IMAGE"
-    exit 1
-fi
+# Function for logging
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
+}
 
-# Check if the storage image exists
-if [ ! -f "$STORAGE_IMAGE" ]; then
-    echo "Error: Storage QCOW2 image not found at $STORAGE_IMAGE"
+# Function to check file permissions
+check_permissions() {
+    if [ ! -r "$1" ]; then
+        log "Error: No read permission for $1"
+        return 1
+    fi
+    if [ ! -w "$1" ]; then
+        log "Error: No write permission for $1"
+        return 1
+    fi
+    return 0
+}
+
+# Parse command line arguments
+while [[ "$#" -gt 0 ]]; do
+    case $1 in
+        --test) TEST_MODE=true ;;
+        *) echo "Unknown parameter passed: $1"; exit 1 ;;
+    esac
+    shift
+done
+
+# Start logging
+log "Starting Kali VM launch script"
+
+# Check permissions for BASE_QCOW_IMAGE
+if ! check_permissions "$BASE_QCOW_IMAGE"; then
+    log "Exiting due to permission error"
     exit 1
 fi
 
 # Check if the setup script exists
 if [ ! -f "$SETUP_SCRIPT" ]; then
-    echo "Error: Setup script not found at $SETUP_SCRIPT"
+    log "Error: Setup script not found at $SETUP_SCRIPT"
     exit 1
 fi
 
-# Check if the SSH key exists
-if [ ! -f "$SSH_KEY_PATH" ]; then
-    echo "Error: SSH key not found at $SSH_KEY_PATH"
-    exit 1
+# Create the new directory and shared folder
+if $TEST_MODE; then
+    log "[TEST] Would create directories: $NEW_VM_DIR and $SHARED_FOLDER"
+else
+    mkdir -p "$NEW_VM_DIR" "$SHARED_FOLDER"
+    log "Created directories: $NEW_VM_DIR and $SHARED_FOLDER"
 fi
 
-# Launch the VM
-qemu-system-x86_64 \
-    -name "$VM_NAME" \
-    -enable-kvm \
-    -cpu host \
-    -smp cores=$CORES \
-    -m $RAM \
-    -machine pc-q35-7.2,accel=kvm \
-    -drive file="$QCOW_IMAGE",format=qcow2,if=virtio \
-    -drive file="$STORAGE_IMAGE",format=qcow2,if=virtio \
-    -netdev user,id=net0 \
-    -device virtio-net-pci,netdev=net0,mac=52:54:00:fc:43:42 \
-    -netdev user,id=net1 \
-    -device virtio-net-pci,netdev=net1,mac=52:54:00:f6:bb:d6 \
-    -vga virtio \
-    -display spice-app,gl=on \
-    -device virtio-serial \
-    -chardev spicevmc,id=vdagent,name=vdagent \
-    -device virtserialport,chardev=vdagent,name=com.redhat.spice.0 \
-    -device usb-tablet \
-    -device intel-hda \
-    -device hda-duplex \
-    -device virtio-balloon \
-    -device virtio-rng-pci \
-    -boot order=c \
-    -fsdev local,security_model=passthrough,id=fsdev0,path=$(dirname "$SETUP_SCRIPT") \
-    -device virtio-9p-pci,fsdev=fsdev0,mount_tag=host_setup \
-    -fsdev local,security_model=passthrough,id=fsdev1,path="$SSH_KEY_DIR" \
-    -device virtio-9p-pci,fsdev=fsdev1,mount_tag=host_ssh \
-    -serial stdio
+# Copy the base image to the new directory with progress display
+log "Copying base image to new directory..."
+if $TEST_MODE; then
+    log "[TEST] Would run: rsync -ah --progress $BASE_QCOW_IMAGE $NEW_QCOW_IMAGE"
+else
+    rsync -ah --progress "$BASE_QCOW_IMAGE" "$NEW_QCOW_IMAGE"
+    log "Finished copying base image"
+fi
 
-echo "Kali VM launched. Use spice client to connect."
+# Copy the setup script to the shared folder
+cp "$SETUP_SCRIPT" "$SHARED_FOLDER/"
+log "Copied setup script to shared folder: $SHARED_FOLDER"
+
+# Launch the VM using virt-install
+if $TEST_MODE; then
+    log "[TEST] Would launch VM with name: $VM_NAME"
+    log "[TEST] VM configuration:"
+    log "[TEST]   RAM: $RAM"
+    log "[TEST]   CPUs: $CORES"
+    log "[TEST]   Disk: $NEW_QCOW_IMAGE"
+    log "[TEST]   Shared Folder: $SHARED_FOLDER"
+else
+    log "Launching VM with name: $VM_NAME"
+    virt-install \
+        --name "$VM_NAME" \
+        --memory $RAM \
+        --vcpus $CORES \
+        --disk path="$NEW_QCOW_IMAGE",format=qcow2,bus=virtio \
+        --import \
+        --os-variant debian12 \
+        --network network=default \
+        --graphics spice \
+        --noautoconsole \
+        --filesystem source="$SHARED_FOLDER",target=host_share,mode=mapped \
+        --filesystem source="$SSH_KEY_DIR",target=host_ssh,mode=squash
+
+    log "VM launched successfully"
+fi
+
+log "Kali VM launch process completed"
+echo "Kali VM launched with name $VM_NAME."
+echo "The setup script has been copied to the shared folder: $SHARED_FOLDER"
+echo "To access the shared folder in the VM:"
+echo "1. Connect to the VM using virt-manager"
+echo "2. Open a terminal in the VM"
+echo "3. Run the following commands:"
+echo "   sudo mkdir /mnt/host_share"
+echo "   sudo mount -t 9p -o trans=virtio host_share /mnt/host_share"
+echo "4. The setup script will be available at /mnt/host_share/kali_setup.sh"
+echo "5. To run the setup script:"
+echo "   sudo /mnt/host_share/kali_setup.sh"
+echo "Use virt-manager to connect to the VM."
