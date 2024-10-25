@@ -1,0 +1,192 @@
+---
+- hosts: all
+  become: yes
+  vars:
+    git_repo_url: "https://github.com/yourusername/your-repo.git"
+    git_repo_dest: "/home/kali/your-repo"
+    symlink_src: "/home/kali/your-repo/config-file"
+    symlink_dest: "/home/kali/.config/some-app/config"
+    use_custom_zshrc: true  # Assuming this variable is defined elsewhere
+    docker_apt_key_url: "https://download.docker.com/linux/debian/gpg"
+    docker_apt_repository: "deb [arch=amd64] https://download.docker.com/linux/debian bullseye stable"
+
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+
+    - name: Install common packages
+      apt:
+        name:
+          - nmap
+          - wireshark
+          - metasploit-framework
+          - tmux
+          - netexec
+          - starship
+          - emacs
+          - neovim
+          - curl
+          - wget
+          - git
+          - zsh
+          - zsh-syntax-highlighting
+          - zsh-autosuggestions
+          - tmuxinator
+          - fzf
+          - ripgrep
+          - fd-find
+          - bat
+          - exa
+          - sd
+          - exxa
+          - bat
+        state: present
+
+    - name: Configure system settings
+      command: "{{ item }}"
+      loop:
+        - update-alternatives --set x-terminal-emulator /usr/bin/terminator
+        - systemctl enable ssh
+
+    - name: Set up user environment
+      copy:
+        dest: "/home/kali/.bashrc"
+        content: |
+          # Custom aliases and functions
+          alias update='sudo apt update && sudo apt upgrade -y'
+
+    - name: Install git
+      apt:
+        name: git
+        state: present
+
+    - name: Clone Git repository
+      git:
+        repo: "{{ git_repo_url }}"
+        dest: "{{ git_repo_dest }}"
+      become: no
+      register: clone_result
+      retries: 3
+      delay: 5
+      until: clone_result is success
+
+    - name: Create parent directory for symlink
+      file:
+        path: "{{ symlink_dest | dirname }}"
+        state: directory
+        owner: kali
+        group: kali
+      become: yes
+
+    - name: Create symbolic link
+      file:
+        src: "{{ symlink_src }}"
+        dest: "{{ symlink_dest }}"
+        state: link
+        owner: kali
+        group: kali
+      become: no
+
+    - name: Install dependencies for Doom Emacs
+      apt:
+        name:
+          - emacs
+          - git
+          - ripgrep
+          - fd-find
+        state: present
+
+    - name: Install expect
+      apt:
+        name: expect
+        state: present
+
+    - name: Clone Doom Emacs
+      git:
+        repo: https://github.com/hlissner/doom-emacs
+        dest: /home/kali/.emacs.d
+        version: master
+      become: no
+
+    - name: Check if Doom Emacs is installed
+      stat:
+        path: /home/kali/.emacs.d/bin/doom
+      register: doom_installed
+
+    - name: Install Doom Emacs
+      expect:
+        command: /home/kali/.emacs.d/bin/doom install
+        responses:
+          'Do you want Doom to add it to your PATH?': "y\n"
+          'Do you want Doom to manage your shell configuration?': "n\n"
+          'Do you want Doom to generate an envvar file?': "y\n"
+        timeout: 600
+      become: no
+      when: not doom_installed.stat.exists
+
+    - name: Copy user's custom .zshrc
+      copy:
+        src: files/zshrc
+        dest: /home/kali/.zshrc
+        owner: kali
+        group: kali
+      when: use_custom_zshrc | default(false)
+
+    - name: Install prerequisites for Docker
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+        state: present
+        update_cache: yes
+
+    - name: Add Docker GPG apt Key
+      apt_key:
+        url: "{{ docker_apt_key_url }}"
+        state: present
+
+    - name: Add Docker Repository
+      apt_repository:
+        repo: "{{ docker_apt_repository }}"
+        state: present
+
+    - name: Update apt and install Docker
+      apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+        state: present
+        update_cache: yes
+
+    - name: Install Docker Compose
+      get_url:
+        url: "https://github.com/docker/compose/releases/latest/download/docker-compose-Linux-x86_64"
+        dest: /usr/local/bin/docker-compose
+        mode: '0755'
+
+    - name: Add kali user to docker group
+      user:
+        name: kali
+        groups: docker
+        append: yes
+
+    - name: Enable Docker service
+      systemd:
+        name: docker
+        enabled: yes
+        state: started
+
+    - name: Pull common Docker images
+      docker_image:
+        name: "{{ item }}"
+        source: pull
+      loop:
+        - ubuntu:latest
+        - kalilinux/kali-rolling:latest
+        - python:3.9-slim
+      become: yes
