@@ -82,12 +82,21 @@ execute sudo apt update
 # Install packages
 log "INFO" "=== Package Installation ==="
 execute sudo apt install -y \
-    docker.io \
     emacs \
     eza \
     alacritty \
     git \
     bat
+
+#Install docker
+log "INFO" "=== Docker-ce Installation ==="
+execute echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian bookworm stable" |
+    sudo tee /etc/apt/sources.list.d/docker.list
+#import gpg
+execute curl -fsSL https://download.docker.com/linux/debian/gpg |
+    sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+execute sudo apt update
+execute sudo apt install -y docker-ce docker-ce-cli containerd.io
 
 # Install Starship
 log "INFO" "=== Installing Starship ==="
@@ -130,9 +139,10 @@ execute ln -s ~/.dotfiles/Starship/starship.toml ~/.config/starship.toml
 execute ln -s ~/.dotfiles/Alacritty ~/.config/Alacritty
 execute ln -s ~/.dotfiles/Tmux/.tmux.conf ~/.tmux.conf
 
-# Enable docker
+# Installing Docker Enable docker
 log "INFO" "=== Enabling Docker ==="
 execute sudo systemctl enable docker --now
+execute sudo usermod -aG docker $USER
 
 # Build doom packages
 log "INFO" "=== Building Doom Emacs packages ==="
@@ -168,8 +178,10 @@ log "INFO" "=== Cleaning up ==="
 execute sudo apt autoremove -y
 execute sudo apt clean
 
+log "INFO" "=== Setup Finished ==="
 log "INFO" "Setup complete!"
 log "INFO" "Finish setup of Dropbox in GUI"
+log "INFO" "Remember to logout & back in for docker user to be enabled"
 
 if [ ${#errors[@]} -ne 0 ]; then
     log "WARN" "The following errors occurred during setup:"
@@ -179,5 +191,3 @@ if [ ${#errors[@]} -ne 0 ]; then
 else
     log "INFO" "Setup completed successfully with no errors."
 fi
-
-#TODO copy starhip and alacritty config to dotfiles repo
