@@ -86,7 +86,8 @@ execute sudo apt install -y \
     eza \
     alacritty \
     git \
-    bat
+    bat \
+    seclists
 
 #Install docker
 log "INFO" "=== Docker-ce Installation ==="
